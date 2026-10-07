@@ -16,12 +16,14 @@ class VelocityAdsLevelPlayRewardedVideo(
 ) : BaseRewardedVideo<VelocityAdsLevelPlayAdapter>(networkSettings) {
     private var ad: VelocityRewardedAd? = null
     private var handler: VelocityRewardedAdHandler? = null
+    private var loadGeneration = 0L
 
     override fun loadAd(
         adData: AdData,
         context: Context,
         listener: RewardedVideoAdListener,
     ) {
+        val requestGeneration = ++loadGeneration
         val adUnitId = VelocityAdsServerParameters.parse(adData).adUnitId
         if (adUnitId == null) {
             val error = VelocityAdsErrorMapper.missingParameter(RegistrationConfig.AD_UNIT_ID)
@@ -39,6 +41,7 @@ class VelocityAdsLevelPlayRewardedVideo(
         }
         adapter.forwardPrivacySettings()
         adapter.ensureInitialized(adData, context) { initialized ->
+            if (requestGeneration != loadGeneration) return@ensureInitialized
             if (!initialized) {
                 listener.onAdLoadFailed(
                     AdapterErrorType.ADAPTER_ERROR_TYPE_INTERNAL,
@@ -80,6 +83,7 @@ class VelocityAdsLevelPlayRewardedVideo(
     override fun isAdAvailable(adData: AdData): Boolean = ad?.isReady == true
 
     override fun destroyAd(adData: AdData) {
+        loadGeneration += 1
         ad?.destroy()
         ad = null
         handler = null

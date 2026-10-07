@@ -15,12 +15,14 @@ class VelocityAdsLevelPlayInterstitial(
 ) : BaseInterstitial<VelocityAdsLevelPlayAdapter>(networkSettings) {
     private var ad: VelocityInterstitialAd? = null
     private var handler: VelocityInterstitialAdHandler? = null
+    private var loadGeneration = 0L
 
     override fun loadAd(
         adData: AdData,
         context: Context,
         listener: InterstitialAdListener,
     ) {
+        val requestGeneration = ++loadGeneration
         val adUnitId = VelocityAdsServerParameters.parse(adData).adUnitId
         if (adUnitId == null) {
             val error = VelocityAdsErrorMapper.missingParameter(RegistrationConfig.AD_UNIT_ID)
@@ -38,6 +40,7 @@ class VelocityAdsLevelPlayInterstitial(
         }
         adapter.forwardPrivacySettings()
         adapter.ensureInitialized(adData, context) { initialized ->
+            if (requestGeneration != loadGeneration) return@ensureInitialized
             if (!initialized) {
                 listener.onAdLoadFailed(
                     com.ironsource.mediationsdk.adunit.adapter.utility.AdapterErrorType.ADAPTER_ERROR_TYPE_INTERNAL,
@@ -79,6 +82,7 @@ class VelocityAdsLevelPlayInterstitial(
     override fun isAdAvailable(adData: AdData): Boolean = ad?.isReady == true
 
     override fun destroyAd(adData: AdData) {
+        loadGeneration += 1
         ad?.destroy()
         ad = null
         handler = null

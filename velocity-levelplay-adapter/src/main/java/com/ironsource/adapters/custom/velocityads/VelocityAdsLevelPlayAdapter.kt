@@ -61,29 +61,33 @@ class VelocityAdsLevelPlayAdapter :
         forwardPrivacySettings()
 
         if (VelocityAds.isInitialized()) {
-            listener?.onInitSuccess()
+            runOnMain { listener?.onInitSuccess() }
             return
         }
 
         val appKey = VelocityAdsServerParameters.parse(adData).appKey
         if (appKey == null) {
-            listener?.onInitFailed(
-                AdapterErrors.ADAPTER_ERROR_MISSING_PARAMS,
-                "Missing required LevelPlay configuration value: ${RegistrationConfig.APP_KEY}",
-            )
+            runOnMain {
+                listener?.onInitFailed(
+                    AdapterErrors.ADAPTER_ERROR_MISSING_PARAMS,
+                    "Missing required LevelPlay configuration value: ${RegistrationConfig.APP_KEY}",
+                )
+            }
             return
         }
         storedAppKey = storedAppKey ?: appKey
         runOnMain {
             val won =
                 initCoalescer.claim { initialized ->
-                    if (initialized) {
-                        listener?.onInitSuccess()
-                    } else {
-                        listener?.onInitFailed(
-                            AdapterErrors.ADAPTER_ERROR_INTERNAL,
-                            "Velocity Ads initialization failed",
-                        )
+                    runOnMain {
+                        if (initialized) {
+                            listener?.onInitSuccess()
+                        } else {
+                            listener?.onInitFailed(
+                                AdapterErrors.ADAPTER_ERROR_INTERNAL,
+                                "Velocity Ads initialization failed",
+                            )
+                        }
                     }
                 }
             if (won) startClaimedInit(context.applicationContext, appKey)
@@ -98,7 +102,7 @@ class VelocityAdsLevelPlayAdapter :
         forwardMediationInfo()
         forwardPrivacySettings()
         if (VelocityAds.isInitialized()) {
-            onReady(true)
+            runOnMain { onReady(true) }
             return
         }
 
@@ -106,7 +110,7 @@ class VelocityAdsLevelPlayAdapter :
         if (loadAppKey != null && storedAppKey == null) storedAppKey = loadAppKey
         val appKey = loadAppKey ?: storedAppKey
         if (appKey == null) {
-            onReady(false)
+            runOnMain { onReady(false) }
             return
         }
 
@@ -115,7 +119,10 @@ class VelocityAdsLevelPlayAdapter :
                 onReady(true)
                 return@runOnMain
             }
-            val won = initCoalescer.claim(onReady)
+            val won =
+                initCoalescer.claim { initialized ->
+                    runOnMain { onReady(initialized) }
+                }
             if (won) startClaimedInit(context.applicationContext, appKey)
         }
     }
@@ -131,25 +138,29 @@ class VelocityAdsLevelPlayAdapter :
                 request,
                 object : VelocityAdsInitListener {
                     override fun onInitSuccess() {
-                        initCoalescer.complete(true)
+                        completeOnMain(true)
                     }
 
                     override fun onInitFailure(error: VelocityAdsError) {
                         if (error.code == VelocityAdsErrorCode.SDK_INITIALIZATION_IN_PROGRESS) {
                             InFlightInitPoller.awaitInitialization(VelocityAds::isInitialized) {
-                                initCoalescer.complete(it)
+                                completeOnMain(it)
                             }
                         } else {
                             Log.w(TAG, "Initialization failed [${error.code}]: ${error.message}")
-                            initCoalescer.complete(false)
+                            completeOnMain(false)
                         }
                     }
                 },
             )
         } catch (error: Throwable) {
             Log.e(TAG, "Initialization threw unexpectedly", error)
-            initCoalescer.complete(false)
+            completeOnMain(false)
         }
+    }
+
+    private fun completeOnMain(initialized: Boolean) {
+        runOnMain { initCoalescer.complete(initialized) }
     }
 
     override fun getNetworkSDKVersion(): String = VelocityAds.getSdkVersion()

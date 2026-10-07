@@ -13,6 +13,7 @@ class VelocityAdsLevelPlayBanner(
     networkSettings: NetworkSettings,
 ) : BaseBanner<VelocityAdsLevelPlayAdapter>(networkSettings) {
     private var handler: VelocityBannerAdHandler? = null
+    private var loadGeneration = 0L
 
     override fun loadAd(
         adData: AdData,
@@ -20,6 +21,7 @@ class VelocityAdsLevelPlayBanner(
         bannerSize: ISBannerSize,
         listener: BannerAdListener,
     ) {
+        val requestGeneration = ++loadGeneration
         val adUnitId = VelocityAdsServerParameters.parse(adData).adUnitId
         if (adUnitId == null) {
             val error = VelocityAdsErrorMapper.missingParameter(RegistrationConfig.AD_UNIT_ID)
@@ -37,6 +39,7 @@ class VelocityAdsLevelPlayBanner(
         }
         adapter.forwardPrivacySettings()
         adapter.ensureInitialized(adData, activity) { initialized ->
+            if (requestGeneration != loadGeneration) return@ensureInitialized
             if (!initialized) {
                 listener.onAdLoadFailed(
                     AdapterErrorType.ADAPTER_ERROR_TYPE_INTERNAL,
@@ -54,6 +57,7 @@ class VelocityAdsLevelPlayBanner(
     }
 
     override fun destroyAd(adData: AdData) {
+        loadGeneration += 1
         handler?.destroy()
         handler = null
     }

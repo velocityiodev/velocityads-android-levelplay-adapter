@@ -1,0 +1,95 @@
+name: Release – Publish to Maven Central
+
+env:
+  ADAPTER_MODULE: velocity-levelplay-adapter
+  MAVEN_GROUP: io.velocity
+  MAVEN_ARTIFACT: levelplay-mediation
+  ADAPTER_DISPLAY_NAME: Velocity Ads LevelPlay Adapter
+  AAR_PATH: velocity-levelplay-adapter/build/outputs/aar/velocity-levelplay-adapter-release.aar
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Adapter version to release (four segments)
+        required: true
+        type: string
+      dry_run:
+        description: Stage without releasing or tagging
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - name: Validate version and branch
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          test "${{ github.ref_name }}" = "release/${VERSION}"
+          test "$(sed -n 's/^VERSION_NAME=//p' gradle.properties)" = "$VERSION"
+          test "$(grep -m1 '^## \[' CHANGELOG.md | sed -E 's/^## \[([^]]+)\].*/\1/')" = "$VERSION"
+          ! git ls-remote --tags origin | grep -q "refs/tags/${VERSION}$"
+
+  build-and-publish:
+    needs: validate
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.dry_run && '' || 'production-release' }}
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-java@v5
+        with:
+          java-version: '17'
+          distribution: temurin
+          cache: gradle
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools
+      - name: Build and test
+        run: ./gradlew :${{ env.ADAPTER_MODULE }}:ktlintCheck :${{ env.ADAPTER_MODULE }}:build
+      - name: Publish staging repository
+        env:
+          SIGNING_KEY_ID: ${{ secrets.SIGNING_KEY_ID }}
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+          SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
+          CENTRAL_PORTAL_TOKEN_USER: ${{ secrets.CENTRAL_PORTAL_TOKEN_USER }}
+          CENTRAL_PORTAL_TOKEN_PASSWORD: ${{ secrets.CENTRAL_PORTAL_TOKEN_PASSWORD }}
+        run: |
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            ./gradlew publishToSonatype closeSonatypeStagingRepository
+          else
+            ./gradlew publishToSonatype closeAndReleaseSonatypeStagingRepository
+          fi
+      - name: Upload AAR
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-aar
+          path: ${{ env.AAR_PATH }}
+      - name: Create release tag
+        if: ${{ !inputs.dry_run }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          git tag "$VERSION"
+          git push origin "$VERSION"
+          gh release create "$VERSION" "${{ env.AAR_PATH }}" \
+            --title "${{ env.ADAPTER_DISPLAY_NAME }} ${VERSION}" \
+            --generate-notes
